@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import crypto from 'crypto';
 import mongoose from 'mongoose';
+import { createCollaborationToken } from '../auth.js';
 import { requireAuth } from '../middleware/requireAuth.js';
 import { Document } from '../models/Document.js';
 import { DocumentMember } from '../models/DocumentMember.js';
@@ -12,6 +13,39 @@ const router = Router();
 router.use(requireAuth);
 
 const documentViews = new Set(['all', 'recent', 'shared', 'private', 'owned']);
+
+const getActiveDocument = (request, documentId) => {
+    const server = request.app.get('hocuspocus');
+    const documents = server?.hocuspocus?.documents ?? server?.documents;
+    return documents?.get(documentId.toString()) ?? null;
+};
+
+const updateActiveMemberAccess = (request, documentId, userId, role) => {
+    const activeDocument = getActiveDocument(request, documentId);
+    if (!activeDocument) return;
+
+    activeDocument.getConnections()
+        .filter((connection) =>
+            connection.context.collaboration?.userId === userId.toString())
+        .forEach((connection) => {
+            connection.context.collaboration.role = role;
+            connection.readOnly = role === 'viewer';
+            connection.sendStateless(JSON.stringify({
+                type: 'permission-updated',
+                role,
+            }));
+        });
+};
+
+const closeActiveMemberConnections = (request, documentId, userId) => {
+    const activeDocument = getActiveDocument(request, documentId);
+    if (!activeDocument) return;
+
+    activeDocument.getConnections()
+        .filter((connection) =>
+            connection.context.collaboration?.userId === userId.toString())
+        .forEach((connection) => connection.close());
+};
 
 const escapeRegex = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -89,7 +123,7 @@ const serializeDocuments = async (documents, currentUserId) => {
         return {
             id: document._id.toString(),
             title: document.title,
-            content: document.content || '',
+            legacyContent: document.content || undefined,
             createdAt: document.createdAt.toISOString(),
             updatedAt: document.updatedAt.toISOString(),
             access: owner ? document.visibility : 'shared',
@@ -162,6 +196,21 @@ router.post('/', async (request, response) => {
     return response.status(201).json({ document: serialized });
 });
 
+router.post('/:documentId/collaboration-token', async (request, response) => {
+    if (!validateDocumentId(request, response)) return;
+
+    const access = await getDocumentAccess(request.params.documentId, request.user._id);
+    if (!access) return response.status(404).json({ message: 'Document not found.' });
+
+    return response.json({
+        token: createCollaborationToken({
+            userId: request.user._id.toString(),
+            documentId: access.document._id.toString(),
+            role: access.membership.role,
+        }),
+    });
+});
+
 router.get('/:documentId', async (request, response) => {
     if (!validateDocumentId(request, response)) return;
 
@@ -196,14 +245,13 @@ router.patch('/:documentId', async (request, response) => {
         if (!title) return response.status(400).json({ message: 'Title cannot be empty.' });
         document.title = title.slice(0, 200);
     }
-    if (typeof request.body?.content === 'string') {
+    if (request.body?.content !== undefined) {
         if (!canEdit) {
             return response.status(403).json({ message: 'You cannot edit this document.' });
         }
-        if (Buffer.byteLength(request.body.content, 'utf8') > 1_000_000) {
-            return response.status(413).json({ message: 'Document content is too large.' });
-        }
-        document.content = request.body.content;
+        return response.status(400).json({
+            message: 'Document content is persisted through collaboration sync.',
+        });
     }
     if (request.body?.permission !== undefined) {
         if (!isOwner) {
@@ -216,6 +264,18 @@ router.patch('/:documentId', async (request, response) => {
         document.visibility = request.body.permission === 'private' ? 'private' : 'shared';
     }
     await document.save();
+
+    if (request.body?.permission !== undefined) {
+        const hocuspocusServer = request.app.get('hocuspocus');
+        if (hocuspocusServer) {
+            const activeDoc = hocuspocusServer.hocuspocus.documents.get(document._id.toString());
+            if (activeDoc) {
+                activeDoc.broadcastStateless(JSON.stringify({
+                    type: 'permission-updated',
+                }));
+            }
+        }
+    }
 
     const [serialized] = await serializeDocuments([document], request.user._id.toString());
     return response.json({ document: serialized });
@@ -234,6 +294,9 @@ router.delete('/:documentId', async (request, response) => {
         _id: request.params.documentId,
         ownerId: request.user._id,
     });
+
+    const activeDocument = getActiveDocument(request, document._id);
+    activeDocument?.getConnections().forEach((connection) => connection.close());
 
     await Promise.all([
         DocumentMember.deleteMany({ documentId: document._id }),
@@ -274,6 +337,7 @@ router.post('/:documentId/invitations', async (request, response) => {
         if (existingMember) {
             existingMember.role = role;
             await existingMember.save();
+            updateActiveMemberAccess(request, document._id, existingMember.userId, role);
         }
     }
 
@@ -323,6 +387,18 @@ router.patch('/:documentId/collaborators/:collaboratorId', async (request, respo
     if (invitation) {
         invitation.role = role;
         await invitation.save();
+
+        const hocuspocusServer = request.app.get('hocuspocus');
+        if (hocuspocusServer) {
+            const activeDoc = hocuspocusServer.hocuspocus.documents.get(document._id.toString());
+            if (activeDoc) {
+                activeDoc.broadcastStateless(JSON.stringify({
+                    type: 'permission-updated',
+                    collaboratorId: request.params.collaboratorId,
+                    role,
+                }));
+            }
+        }
         return response.json({ ok: true });
     }
 
@@ -334,6 +410,19 @@ router.patch('/:documentId/collaborators/:collaboratorId', async (request, respo
     if (!member) return response.status(404).json({ message: 'Collaborator not found.' });
     member.role = role;
     await member.save();
+    updateActiveMemberAccess(request, document._id, member.userId, role);
+
+    const hocuspocusServer = request.app.get('hocuspocus');
+    if (hocuspocusServer) {
+        const activeDoc = hocuspocusServer.hocuspocus.documents.get(document._id.toString());
+        if (activeDoc) {
+            activeDoc.broadcastStateless(JSON.stringify({
+                type: 'permission-updated',
+                collaboratorId: request.params.collaboratorId,
+                role,
+            }));
+        }
+    }
     return response.json({ ok: true });
 });
 
@@ -351,12 +440,28 @@ router.delete('/:documentId/collaborators/:collaboratorId', async (request, resp
         documentId: document._id,
         status: 'pending',
     }, { status: 'revoked' });
+    let removedMember = null;
     if (!invitation) {
-        await DocumentMember.deleteOne({
+        removedMember = await DocumentMember.findOneAndDelete({
             _id: request.params.collaboratorId,
             documentId: document._id,
             role: { $ne: 'owner' },
         });
+    }
+    if (removedMember) {
+        closeActiveMemberConnections(request, document._id, removedMember.userId);
+    }
+
+    const hocuspocusServer = request.app.get('hocuspocus');
+    if (hocuspocusServer) {
+        const activeDoc = hocuspocusServer.hocuspocus.documents.get(document._id.toString());
+        if (activeDoc) {
+            activeDoc.broadcastStateless(JSON.stringify({
+                type: 'permission-updated',
+                collaboratorId: request.params.collaboratorId,
+                action: 'removed',
+            }));
+        }
     }
     return response.status(204).send();
 });

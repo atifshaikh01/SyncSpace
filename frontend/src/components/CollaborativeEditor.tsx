@@ -4,8 +4,10 @@ import { BubbleMenu } from '@tiptap/react/menus'
 import StarterKit from '@tiptap/starter-kit'
 import Collaboration from '@tiptap/extension-collaboration'
 import CollaborationCaret from '@tiptap/extension-collaboration-caret'
-import { HocuspocusProvider } from '@hocuspocus/provider'
+import { HocuspocusProvider, HocuspocusProviderWebsocket } from '@hocuspocus/provider'
 import * as Y from 'yjs'
+import { authApi } from '../lib/auth'
+import { documentsApi } from '../lib/documents'
 import {
   Bold,
   ChevronDown,
@@ -29,48 +31,64 @@ interface CollaborativeEditorProps {
   docId: string
   currentUser: User
   title: string
-  content: string
+  legacyContent: string
   readOnly?: boolean
   saveRequest: number
-  onSaveContent: (content: string) => Promise<void>
   onSaveStatusChange: (status: 'saved' | 'saving' | 'offline') => void
   onConnectionStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void
   onOnlineUsersChange: (users: OnlineUser[]) => void
+  onPermissionUpdated?: () => void
+  onLegacyContentMigrated?: () => void
 }
 
 export function CollaborativeEditor({
   docId,
   currentUser,
   title,
-  content,
+  legacyContent,
   readOnly = false,
   saveRequest,
-  onSaveContent,
   onSaveStatusChange,
   onConnectionStatusChange,
   onOnlineUsersChange,
+  onPermissionUpdated,
+  onLegacyContentMigrated,
 }: CollaborativeEditorProps) {
-  const saveTimer = useRef<number | null>(null)
-  const latestContent = useRef(content)
-  const saveContent = useRef(onSaveContent)
+  const resourceDestroyTimer = useRef<number | null>(null)
   const contentHydrated = useRef(false)
+  const permissionUpdated = useRef(onPermissionUpdated)
+  const legacyContentMigrated = useRef(onLegacyContentMigrated)
 
   useEffect(() => {
-    saveContent.current = onSaveContent
-  }, [onSaveContent])
+    permissionUpdated.current = onPermissionUpdated
+  }, [onPermissionUpdated])
 
-  const { ydoc, provider } = useMemo(() => {
+  useEffect(() => {
+    legacyContentMigrated.current = onLegacyContentMigrated
+  }, [onLegacyContentMigrated])
+
+  const { ydoc, provider, websocket } = useMemo(() => {
     const document = new Y.Doc()
+    const socket = new HocuspocusProviderWebsocket({
+      url: 'ws://localhost:8080',
+      autoConnect: false,
+    })
     return {
       ydoc: document,
       provider: new HocuspocusProvider({
-        url: 'ws://localhost:8080',
         name: docId,
         document,
-        token: 'mock-token',
+        token: async () => {
+          const response = currentUser.accountType === 'account'
+            ? await documentsApi.collaborationToken(docId)
+            : await authApi.guestCollaborationToken(currentUser.id, docId)
+          return response.token
+        },
+        websocketProvider: socket,
       }),
+      websocket: socket,
     }
-  }, [docId])
+  }, [docId, currentUser.accountType, currentUser.id])
 
   useEffect(() => {
     provider.awareness?.setLocalStateField('user', currentUser)
@@ -81,19 +99,6 @@ export function CollaborativeEditor({
 
     onSaveStatusChange('saving')
     provider.forceSync()
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
-    saveTimer.current = null
-    let active = true
-    saveContent.current(latestContent.current)
-      .then(() => {
-        if (active) onSaveStatusChange('saved')
-      })
-      .catch(() => {
-        if (active) onSaveStatusChange('offline')
-      })
-    return () => {
-      active = false
-    }
   }, [onSaveStatusChange, provider, readOnly, saveRequest])
 
   useEffect(() => {
@@ -134,8 +139,21 @@ export function CollaborativeEditor({
         all.findIndex((candidate) => candidate.id === user.id) === index,
       ))
     }
+    const handleStateless = ({ payload }: { payload: string }) => {
+      try {
+        const data = JSON.parse(payload)
+        if (data?.type === 'permission-updated') {
+          permissionUpdated.current?.()
+        }
+      } catch {
+        if (payload === 'permission-updated') {
+          permissionUpdated.current?.()
+        }
+      }
+    }
     provider.on('status', handleStatus)
     provider.on('synced', handleSynced)
+    provider.on('stateless', handleStateless)
     ydoc.on('update', handleDocumentUpdate)
     provider.awareness?.on('change', handleAwareness)
     onSaveStatusChange('saving')
@@ -144,11 +162,9 @@ export function CollaborativeEditor({
       if (providerStatusTimer) window.clearTimeout(providerStatusTimer)
       provider.off('status', handleStatus)
       provider.off('synced', handleSynced)
+      provider.off('stateless', handleStateless)
       ydoc.off('update', handleDocumentUpdate)
       provider.awareness?.off('change', handleAwareness)
-      if (saveTimer.current) window.clearTimeout(saveTimer.current)
-      provider.destroy()
-      ydoc.destroy()
     }
   }, [
     onConnectionStatusChange,
@@ -173,18 +189,9 @@ export function CollaborativeEditor({
         'data-placeholder': readOnly ? '' : 'Start writing, or press "/" for commands...',
       },
     },
-    onUpdate: ({ editor: currentEditor }) => {
-      if (readOnly) return
-      const html = currentEditor.getHTML()
-      latestContent.current = html
+    onUpdate: () => {
+      if (readOnly || !contentHydrated.current) return
       onSaveStatusChange('saving')
-      if (saveTimer.current) window.clearTimeout(saveTimer.current)
-      saveTimer.current = window.setTimeout(() => {
-        saveTimer.current = null
-        saveContent.current(html)
-          .then(() => onSaveStatusChange('saved'))
-          .catch(() => onSaveStatusChange('offline'))
-      }, 900)
     },
     editable: !readOnly,
     immediatelyRender: false,
@@ -197,33 +204,48 @@ export function CollaborativeEditor({
   useEffect(() => {
     if (!editor) return
 
-    const applyServerContent = () => {
-      const normalizedContent = content || '<p></p>'
-      if (latestContent.current === content && editor.getHTML() === normalizedContent) return
-      latestContent.current = content
-      if (editor.getHTML() !== normalizedContent) {
-        editor.commands.setContent(content || '', { emitUpdate: false })
+    const hydrateEmptyDocument = () => {
+      const normalizedContent = legacyContent.trim()
+      const hasServerContent = normalizedContent !== ''
+        && normalizedContent !== '<p></p>'
+
+      if (editor.isEmpty && hasServerContent) {
+        editor.commands.setContent(legacyContent, { emitUpdate: true })
+        legacyContentMigrated.current?.()
       }
     }
 
-    if (contentHydrated.current) {
-      applyServerContent()
-      return
-    }
+    if (contentHydrated.current) return
 
     const hydrate = () => {
       if (contentHydrated.current) return
       contentHydrated.current = true
-      applyServerContent()
+      hydrateEmptyDocument()
     }
     provider.on('synced', hydrate)
     if (provider.synced) hydrate()
-    const fallback = window.setTimeout(hydrate, 600)
     return () => {
-      window.clearTimeout(fallback)
       provider.off('synced', hydrate)
     }
-  }, [content, editor, provider])
+  }, [editor, legacyContent, provider])
+
+  useEffect(() => {
+    if (resourceDestroyTimer.current) {
+      window.clearTimeout(resourceDestroyTimer.current)
+      resourceDestroyTimer.current = null
+    }
+    provider.attach()
+    void websocket.connect()
+
+    return () => {
+      resourceDestroyTimer.current = window.setTimeout(() => {
+        provider.destroy()
+        websocket.destroy()
+        ydoc.destroy()
+        resourceDestroyTimer.current = null
+      }, 0)
+    }
+  }, [provider, websocket, ydoc])
 
   if (!editor) return null
 

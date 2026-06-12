@@ -80,11 +80,6 @@ kbd { color: var(--faint); font-size: 10px; font-family: inherit; }
 .identity-copy strong { font-size: 12px; font-weight: 650; }
 .identity-copy small { color: var(--muted); font-size: 10px; }
 .avatar { width: 28px; height: 28px; flex: 0 0 auto; border-radius: 50%; display: inline-grid; place-items: center; color: white; font-size: 10px; font-weight: 700; text-transform: uppercase; }
-.identity-options { display: flex; gap: 5px; margin-top: 9px; }
-.identity-options button { position: relative; padding: 0; border: 0; border-radius: 50%; background: none; cursor: pointer; }
-.identity-options button > span { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; color: white; font-size: 9px; font-weight: 700; opacity: .55; }
-.identity-options button.is-selected > span, .identity-options button:hover > span { opacity: 1; }
-.identity-options button svg { position: absolute; right: -3px; bottom: -2px; padding: 1px; border-radius: 50%; color: white; background: var(--accent); }
 .settings-row { width: 100%; margin-top: 5px; }
 .sign-out-row:hover { color: #d25b50; }
 .sidebar-scrim { display: none; }

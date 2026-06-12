@@ -146,22 +146,10 @@ try {
         throw new Error('Editor could not rename the shared document.');
     }
 
-    const savedContent = `<h2>Atlas notes ${suffix}</h2><p>Persisted editor content.</p>`;
-    const contentUpdate = await request(`/api/documents/${sharedId}`, editor.cookie, {
+    await request(`/api/documents/${sharedId}`, editor.cookie, {
         method: 'PATCH',
-        body: JSON.stringify({ content: savedContent }),
-    });
-    if (contentUpdate.body.document.content !== savedContent) {
-        throw new Error('Editor content was not returned after saving.');
-    }
-    const reopened = await request(`/api/documents/${sharedId}`, owner.cookie);
-    if (reopened.body.document.content !== savedContent) {
-        throw new Error('Saved document content was not persisted.');
-    }
-    const viewerOpened = await request(`/api/documents/${sharedId}`, viewer.cookie);
-    if (viewerOpened.body.document.content !== savedContent) {
-        throw new Error('Shared viewer did not receive the latest document content.');
-    }
+        body: JSON.stringify({ content: '<p>REST content writes are disabled.</p>' }),
+    }, 400);
 
     await request(`/api/documents/${sharedId}`, viewer.cookie, {
         method: 'PATCH',

@@ -36,4 +36,9 @@ export const authApi = {
     }),
   me: () => request<AuthResponse>('/api/auth/me'),
   logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+  guestCollaborationToken: (userId: string, documentId: string) =>
+    request<{ token: string }>('/api/auth/guest-collaboration-token', {
+      method: 'POST',
+      body: JSON.stringify({ userId, documentId }),
+    }),
 }

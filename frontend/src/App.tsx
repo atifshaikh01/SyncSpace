@@ -45,12 +45,6 @@ const createShareToken = () => {
   return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
 }
 
-const PRESET_USERS: User[] = [
-  { id: 'user-alice', name: 'Alice Smith', color: '#ef6f5e' },
-  { id: 'user-bob', name: 'Bob Jones', color: '#6f7de8' },
-  { id: 'user-charlie', name: 'Charlie Green', color: '#26a37b' },
-]
-
 const LEGACY_SEED_DOCUMENT_IDS = new Set(['get-started-doc', 'project-roadmap'])
 
 const normalizeStoredTitle = (title: string) => title
@@ -64,8 +58,8 @@ interface WorkspaceShellProps {
   onDeleteDocument: (id: string) => Promise<void>
   onChangeDocumentTitle: (id: string, title: string) => void
   onRenameDocument: (id: string, title: string) => Promise<void>
-  onSaveDocumentContent: (id: string, content: string) => Promise<void>
   onRefreshDocument: (id: string) => Promise<void>
+  onLegacyContentMigrated: (id: string) => void
   onChangePermission: (id: string, permission: SharePermission) => Promise<void>
   onInviteCollaborator: (
     id: string,
@@ -87,8 +81,8 @@ function WorkspaceShell({
   onDeleteDocument,
   onChangeDocumentTitle,
   onRenameDocument,
-  onSaveDocumentContent,
   onRefreshDocument,
+  onLegacyContentMigrated,
   onChangePermission,
   onInviteCollaborator,
   onUpdateCollaborator,
@@ -111,7 +105,6 @@ function WorkspaceShell({
     localStorage.getItem('theme') === 'dark'
     || (!('theme' in localStorage) && window.matchMedia('(prefers-color-scheme: dark)').matches),
   )
-  const [currentUser, setCurrentUser] = useState<User>(sessionUser)
   const [connectionStatus, setConnectionStatus] =
     useState<'connected' | 'connecting' | 'disconnected'>('disconnected')
   const [onlineUsers, setOnlineUsers] = useState<OnlineUser[]>([])
@@ -238,11 +231,6 @@ function WorkspaceShell({
     return () => window.removeEventListener('keydown', handleSaveShortcut)
   })
 
-  const handleSelectUser = (user: User) => {
-    setCurrentUser(user)
-    localStorage.setItem('syncspace_simulated_user_id', user.id)
-  }
-
   if (isSharedLink && (!currentDoc || !hasValidShareAccess)) {
     return (
       <div className="share-access-denied">
@@ -289,9 +277,7 @@ function WorkspaceShell({
           onCreateDocument={onCreateDocument}
           onDeleteDocument={handleDeleteDocument}
           onRenameDocument={onRenameDocument}
-          users={[sessionUser, ...PRESET_USERS.filter((user) => user.id !== sessionUser.id)]}
-          currentUser={currentUser}
-          onSelectUser={handleSelectUser}
+          currentUser={sessionUser}
           onSignOut={onSignOut}
           isOpen={sidebarOpen}
           onClose={() => setSidebarOpen(false)}
@@ -382,17 +368,20 @@ function WorkspaceShell({
 
         <section className="editor-viewport">
           <CollaborativeEditor
-            key={`${currentDoc.id}-${currentUser.id}`}
+            key={`${currentDoc.id}-${sessionUser.id}`}
             docId={currentDoc.id}
-            currentUser={currentUser}
+            currentUser={sessionUser}
             title={currentDoc.title}
-            content={currentDoc.content || ''}
+            legacyContent={currentDoc.legacyContent || ''}
             readOnly={isReadOnly}
             saveRequest={saveRequest}
-            onSaveContent={(content) => onSaveDocumentContent(currentDoc.id, content)}
             onSaveStatusChange={setEditorSaveStatus}
             onConnectionStatusChange={setConnectionStatus}
             onOnlineUsersChange={setOnlineUsers}
+            onPermissionUpdated={() => {
+              void onRefreshDocument(currentDoc.id)
+            }}
+            onLegacyContentMigrated={() => onLegacyContentMigrated(currentDoc.id)}
           />
         </section>
       </main>
@@ -432,16 +421,21 @@ function App() {
     try {
       return (JSON.parse(saved) as DocumentMetadata[])
         .filter((document) => !LEGACY_SEED_DOCUMENT_IDS.has(document.id))
-        .map((document) => ({
-          ...document,
-          title: normalizeStoredTitle(document.title),
-          access: document.access ?? 'private',
-          sharePermission: document.sharePermission
-            ?? (document.access === 'shared' ? 'view' : 'private'),
-          shareToken: document.shareToken
-            ?? (document.access === 'shared' ? createShareToken() : undefined),
-          collaborators: document.collaborators ?? [],
-        }))
+        .map((document) => {
+          const legacyDocument = document as DocumentMetadata & { content?: string }
+          return {
+            ...document,
+            legacyContent: document.legacyContent ?? legacyDocument.content,
+            content: undefined,
+            title: normalizeStoredTitle(document.title),
+            access: document.access ?? 'private',
+            sharePermission: document.sharePermission
+              ?? (document.access === 'shared' ? 'view' : 'private'),
+            shareToken: document.shareToken
+              ?? (document.access === 'shared' ? createShareToken() : undefined),
+            collaborators: document.collaborators ?? [],
+          }
+        })
     } catch {
       return []
     }
@@ -496,7 +490,9 @@ function App() {
       return
     }
     const newDocument: DocumentMetadata = {
-      id: `doc-${Math.random().toString(36).substring(2, 11)}`,
+      id: typeof crypto.randomUUID === 'function'
+        ? `doc-${crypto.randomUUID()}`
+        : `doc-${Date.now()}-${Math.random().toString(36).substring(2, 11)}`,
       title: 'Untitled document',
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
@@ -530,31 +526,29 @@ function App() {
     ))
   }
 
-  const saveDocumentContent = async (id: string, content: string) => {
-    if (sessionUser?.accountType === 'account') {
-      const { document } = await documentsApi.update(id, { content })
-      setDocuments((previous) => previous.map((item) =>
-        item.id === id ? document : item,
-      ))
-      return
+  const refreshDocument = useCallback(async (id: string) => {
+    if (sessionUser?.accountType !== 'account') return
+    try {
+      const { document } = await documentsApi.get(id)
+      setDocuments((previous) => {
+        const exists = previous.some((item) => item.id === id)
+        return exists
+          ? previous.map((item) => item.id === id ? document : item)
+          : [document, ...previous]
+      })
+    } catch (error) {
+      setDocuments((previous) => previous.filter((item) => item.id !== id))
+      throw error
     }
+  }, [sessionUser?.accountType])
+
+  const clearLegacyContent = (id: string) => {
     setDocuments((previous) => previous.map((document) =>
       document.id === id
-        ? { ...document, content, updatedAt: new Date().toISOString() }
+        ? { ...document, legacyContent: undefined }
         : document,
     ))
   }
-
-  const refreshDocument = useCallback(async (id: string) => {
-    if (sessionUser?.accountType !== 'account') return
-    const { document } = await documentsApi.get(id)
-    setDocuments((previous) => {
-      const exists = previous.some((item) => item.id === id)
-      return exists
-        ? previous.map((item) => item.id === id ? document : item)
-        : [document, ...previous]
-    })
-  }, [sessionUser?.accountType])
 
   const changeDocumentPermission = async (id: string, permission: SharePermission) => {
     if (sessionUser?.accountType === 'account') {
@@ -693,7 +687,6 @@ function App() {
       await authApi.logout().catch(() => undefined)
     }
     localStorage.removeItem(SESSION_KEY)
-    localStorage.removeItem('syncspace_simulated_user_id')
     setSessionUser(null)
     setDocuments([])
     setPendingInvitations([])
@@ -750,8 +743,8 @@ function App() {
                 onDeleteDocument={deleteDocument}
                 onChangeDocumentTitle={changeDocumentTitle}
                 onRenameDocument={renameDocument}
-                onSaveDocumentContent={saveDocumentContent}
                 onRefreshDocument={refreshDocument}
+                onLegacyContentMigrated={clearLegacyContent}
                 onChangePermission={changeDocumentPermission}
                 onInviteCollaborator={inviteCollaborator}
                 onUpdateCollaborator={updateCollaborator}

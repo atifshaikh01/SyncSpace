@@ -48,9 +48,13 @@ export const documentsApi = {
       method: 'POST',
       body: JSON.stringify({ title }),
     }),
+  collaborationToken: (id: string) =>
+    request<{ token: string }>(`/api/documents/${id}/collaboration-token`, {
+      method: 'POST',
+    }),
   update: (
     id: string,
-    values: { title?: string; content?: string; permission?: SharePermission },
+    values: { title?: string; permission?: SharePermission },
   ) =>
     request<{ document: DocumentMetadata }>(`/api/documents/${id}`, {
       method: 'PATCH',

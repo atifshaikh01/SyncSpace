@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
 import {
     clearSessionCookie,
+    createCollaborationToken,
     createSessionToken,
     getSessionToken,
     setSessionCookie,
@@ -21,6 +22,8 @@ const publicUser = (user) => ({
 
 const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 const validEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+const validGuestId = (value) => /^guest-[a-zA-Z0-9-]{8,100}$/.test(value);
+const validGuestDocumentId = (value) => /^doc-[a-zA-Z0-9-]{8,100}$/.test(value);
 
 router.post('/register', async (request, response) => {
     try {
@@ -105,6 +108,22 @@ router.get('/me', async (request, response) => {
 router.post('/logout', (_request, response) => {
     clearSessionCookie(response);
     return response.status(204).send();
+});
+
+router.post('/guest-collaboration-token', (request, response) => {
+    const userId = String(request.body?.userId || '');
+    const documentId = String(request.body?.documentId || '');
+    if (!validGuestId(userId) || !validGuestDocumentId(documentId)) {
+        return response.status(400).json({ message: 'Invalid guest collaboration session.' });
+    }
+    return response.json({
+        token: createCollaborationToken({
+            userId,
+            documentId,
+            role: 'editor',
+            guest: true,
+        }),
+    });
 });
 
 export default router;

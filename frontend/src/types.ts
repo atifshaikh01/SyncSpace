@@ -44,7 +44,7 @@ export interface DocumentMetadata {
   sharedBy?: string
   collaborators?: DocumentCollaborator[]
   ownedByCurrentUser?: boolean
-  content?: string
+  legacyContent?: string
 }
 
 export interface Comment {

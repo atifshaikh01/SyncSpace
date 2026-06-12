@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
-  Check,
   ChevronDown,
   ChevronsLeft,
   Clock3,
@@ -22,9 +21,7 @@ interface SidebarProps {
   onCreateDocument: () => void
   onDeleteDocument: (id: string) => Promise<void>
   onRenameDocument: (id: string, newTitle: string) => Promise<void>
-  users: User[]
   currentUser: User
-  onSelectUser: (user: User) => void
   onSignOut: () => void
   isOpen: boolean
   onClose: () => void
@@ -35,9 +32,7 @@ export function Sidebar({
   onCreateDocument,
   onDeleteDocument,
   onRenameDocument,
-  users,
   currentUser,
-  onSelectUser,
   onSignOut,
   isOpen,
   onClose,
@@ -145,19 +140,6 @@ export function Sidebar({
             <div className="identity-copy">
               <span className="avatar" style={{ background: currentUser.color }}>{currentUser.name[0]}</span>
               <div><strong>{currentUser.name}</strong><small>Personal workspace</small></div>
-            </div>
-            <div className="identity-options">
-              {users.map((user) => (
-                <button
-                  key={user.id}
-                  className={user.id === currentUser.id ? 'is-selected' : ''}
-                  onClick={() => onSelectUser(user)}
-                  title={`Switch to ${user.name}`}
-                >
-                  <span style={{ background: user.color }}>{user.name[0]}</span>
-                  {user.id === currentUser.id && <Check size={11} />}
-                </button>
-              ))}
             </div>
           </div>
           <button className="settings-row"><Settings size={16} /><span>Settings</span></button>
