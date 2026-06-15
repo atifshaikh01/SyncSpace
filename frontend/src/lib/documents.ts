@@ -1,5 +1,6 @@
 import type {
   DocumentCollaborator,
+  DocumentComment,
   DocumentMetadata,
   PendingInvitation,
   SharePermission,
@@ -86,4 +87,41 @@ export const invitationsApi = {
     request<{ documentId: string }>(`/api/invitations/${id}/accept`, { method: 'POST' }),
   decline: (id: string) =>
     request<void>(`/api/invitations/${id}/decline`, { method: 'POST' }),
+}
+
+export const commentsApi = {
+  list: (documentId: string, status: 'all' | 'open' | 'resolved' = 'all') =>
+    request<{ comments: DocumentComment[] }>(
+      `/api/documents/${documentId}/comments?status=${status}`,
+    ),
+  create: (documentId: string, content: string) =>
+    request<{ comment: DocumentComment }>(`/api/documents/${documentId}/comments`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    }),
+  reply: (documentId: string, commentId: string, content: string) =>
+    request<{ comment: DocumentComment }>(
+      `/api/documents/${documentId}/comments/${commentId}/replies`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ content }),
+      },
+    ),
+  setResolved: (documentId: string, commentId: string, resolved: boolean) =>
+    request<{ comment: DocumentComment }>(
+      `/api/documents/${documentId}/comments/${commentId}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ resolved }),
+      },
+    ),
+  remove: (documentId: string, commentId: string) =>
+    request<void>(`/api/documents/${documentId}/comments/${commentId}`, {
+      method: 'DELETE',
+    }),
+  removeReply: (documentId: string, commentId: string, replyId: string) =>
+    request<void>(
+      `/api/documents/${documentId}/comments/${commentId}/replies/${replyId}`,
+      { method: 'DELETE' },
+    ),
 }

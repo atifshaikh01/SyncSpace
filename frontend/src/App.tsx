@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { ActiveUsers } from './components/ActiveUsers'
 import { CollaborativeEditor } from './components/CollaborativeEditor'
+import { CommentsPanel } from './components/CommentsPanel'
 import { Dashboard } from './components/Dashboard'
 import { LoginPage } from './components/LoginPage'
 import { ShareModal } from './components/ShareModal'
@@ -94,6 +95,8 @@ function WorkspaceShell({
   const [searchParams] = useSearchParams()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [shareOpen, setShareOpen] = useState(false)
+  const [commentsOpen, setCommentsOpen] = useState(false)
+  const [openCommentCount, setOpenCommentCount] = useState(0)
   const [editorSaveStatus, setEditorSaveStatus] =
     useState<'saved' | 'saving' | 'offline'>('saving')
   const [titleSaveStatus, setTitleSaveStatus] =
@@ -337,7 +340,16 @@ function WorkspaceShell({
               </button>
             )}
             <button className="icon-button hide-compact" aria-label="Version history"><Clock3 size={17} /></button>
-            <button className="icon-button hide-compact" aria-label="Comments"><MessageSquare size={17} /></button>
+            {sessionUser.accountType === 'account' && (
+              <button
+                className={`icon-button comments-toggle ${commentsOpen ? 'is-active' : ''}`}
+                aria-label="Comments"
+                onClick={() => setCommentsOpen((open) => !open)}
+              >
+                <MessageSquare size={17} />
+                {openCommentCount > 0 && <span>{openCommentCount}</span>}
+              </button>
+            )}
             {isSharedLink || currentDoc.ownedByCurrentUser === false ? (
               <span className={`shared-mode-badge ${isReadOnly ? 'view' : 'edit'}`}>
                 {isReadOnly ? <Eye size={14} /> : <Pencil size={14} />}
@@ -396,6 +408,18 @@ function WorkspaceShell({
           onRemoveCollaborator={(collaboratorId) =>
             onRemoveCollaborator(currentDoc.id, collaboratorId)}
           onClose={() => setShareOpen(false)}
+        />
+      )}
+      {commentsOpen && sessionUser.accountType === 'account' && (
+        <CommentsPanel
+          documentId={currentDoc.id}
+          currentUser={sessionUser}
+          canModerate={
+            currentDoc.ownedByCurrentUser !== false
+            || currentDoc.sharePermission === 'edit'
+          }
+          onOpenCountChange={setOpenCommentCount}
+          onClose={() => setCommentsOpen(false)}
         />
       )}
     </div>

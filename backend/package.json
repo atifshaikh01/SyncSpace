@@ -11,7 +11,8 @@
     "test:documents": "node scripts/testDocumentApi.js",
     "test:collaboration": "node scripts/testCollaborationAuth.js",
     "test:persistence": "node scripts/testPersistenceRefresh.js",
-    "check": "node --check src/index.js && node --check src/auth.js && node --check src/middleware/requireAuth.js && node --check src/routes/auth.js && node --check src/routes/documents.js && node --check src/routes/invitations.js && node --check src/models/index.js && node --check src/models/User.js && node --check src/models/Document.js && node --check src/models/DocumentMember.js && node --check src/models/Invitation.js && node --check src/models/ShareLink.js && node --check src/models/DocumentState.js && node --check scripts/removeLegacySeedDocuments.js && node --check scripts/testInvitationFlow.js && node --check scripts/testDocumentApi.js && node --check scripts/testCollaborationAuth.js && node --check scripts/testPersistenceRefresh.js"
+    "test:comments": "node scripts/testCommentsFlow.js",
+    "check": "node --check src/index.js && node --check src/auth.js && node --check src/middleware/requireAuth.js && node --check src/routes/auth.js && node --check src/routes/documents.js && node --check src/routes/invitations.js && node --check src/routes/comments.js && node --check src/models/index.js && node --check src/models/User.js && node --check src/models/Document.js && node --check src/models/DocumentMember.js && node --check src/models/Invitation.js && node --check src/models/ShareLink.js && node --check src/models/DocumentState.js && node --check src/models/Comment.js && node --check scripts/removeLegacySeedDocuments.js && node --check scripts/testInvitationFlow.js && node --check scripts/testDocumentApi.js && node --check scripts/testCollaborationAuth.js && node --check scripts/testPersistenceRefresh.js && node --check scripts/testCommentsFlow.js"
   },
   "keywords": [],
   "author": "",

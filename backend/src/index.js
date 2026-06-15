@@ -14,6 +14,7 @@ import './models/index.js';
 import authRouter from './routes/auth.js';
 import documentsRouter from './routes/documents.js';
 import invitationsRouter from './routes/invitations.js';
+import commentsRouter from './routes/comments.js';
 
 dotenv.config();
 await connectDB();
@@ -51,6 +52,7 @@ app.use(express.json({ limit: '2mb' }));
 app.get('/api/health', (_request, response) => response.json({ status: 'ok' }));
 app.use('/api/auth', authRouter);
 app.use('/api/documents', documentsRouter);
+app.use('/api/documents/:documentId/comments', commentsRouter);
 app.use('/api/invitations', invitationsRouter);
 app.use((error, _request, response, _next) => {
     console.error('HTTP API error:', error);

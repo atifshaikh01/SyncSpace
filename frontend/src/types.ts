@@ -47,12 +47,29 @@ export interface DocumentMetadata {
   legacyContent?: string
 }
 
-export interface Comment {
+export interface CommentAuthor {
   id: string
-  documentId: string
-  authorName: string
-  authorColor: string
+  name: string
+  color: string
+}
+
+export interface CommentReply {
+  id: string
+  author: CommentAuthor
   content: string
   createdAt: string
+  updatedAt: string
+}
+
+export interface DocumentComment {
+  id: string
+  documentId: string
+  author: CommentAuthor
+  content: string
+  createdAt: string
+  updatedAt: string
   resolved: boolean
+  resolvedBy: CommentAuthor | null
+  resolvedAt: string | null
+  replies: CommentReply[]
 }

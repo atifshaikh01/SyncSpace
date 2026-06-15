@@ -4,3 +4,4 @@ export { DocumentMember } from './DocumentMember.js';
 export { Invitation } from './Invitation.js';
 export { ShareLink } from './ShareLink.js';
 export { DocumentState } from './DocumentState.js';
+export { Comment } from './Comment.js';

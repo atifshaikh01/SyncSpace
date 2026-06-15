@@ -8,6 +8,7 @@ import { DocumentMember } from '../models/DocumentMember.js';
 import { DocumentState } from '../models/DocumentState.js';
 import { Invitation } from '../models/Invitation.js';
 import { User } from '../models/User.js';
+import { Comment } from '../models/Comment.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -304,6 +305,7 @@ router.delete('/:documentId', async (request, response) => {
         DocumentState.deleteMany({
             $or: [{ documentId: document._id }, { documentName: document._id.toString() }],
         }),
+        Comment.deleteMany({ documentId: document._id }),
     ]);
     return response.status(204).send();
 });
